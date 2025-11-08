@@ -1,0 +1,26 @@
+# Files to ignore during Railway build
+# This helps reduce build size and speed up deployment
+
+# Large pipeline output files
+output/bertrandcorneliussia-pipeline/
+*.gz
+*.tfrecord
+*.whl
+
+# Data files (not needed for deployment)
+data/
+*.csv
+
+# Development files
+notebook.ipynb
+*.ipynb
+.ipynb_checkpoints/
+
+# Scripts (not needed in production)
+setup_heroku.sh
+start_prometheus.sh
+test_local.py
+
+# Documentation (optional - bisa di-include)
+# *.md
+
