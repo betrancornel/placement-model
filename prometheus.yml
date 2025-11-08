@@ -1,0 +1,43 @@
+# Prometheus configuration file
+# Untuk monitoring Placement Prediction Model
+
+global:
+  scrape_interval: 15s      # Scrape targets setiap 15 detik
+  evaluation_interval: 15s  # Evaluate rules setiap 15 detik
+  external_labels:
+    monitor: 'placement-model-monitor'
+    environment: 'production'
+
+# Alertmanager configuration (opsional)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets:
+#           # - alertmanager:9093
+
+# Load rules (opsional)
+# rule_files:
+#   - "alert_rules.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Job untuk local development
+  - job_name: 'placement-model-local'
+    static_configs:
+      - targets: ['localhost:5000']
+        labels:
+          instance: 'placement-model-local'
+          environment: 'development'
+    
+  # Job untuk Heroku (update dengan URL Heroku Anda)
+  - job_name: 'placement-model-heroku'
+    scheme: https
+    static_configs:
+      - targets: ['bertrandcorneliussia-placement-model.herokuapp.com']
+        labels:
+          instance: 'placement-model-heroku'
+          environment: 'production'
+    metrics_path: '/metrics'
+    scrape_interval: 30s  # Scrape lebih jarang untuk Heroku
+
+
