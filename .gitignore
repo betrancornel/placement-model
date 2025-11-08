@@ -36,15 +36,20 @@ ENV/
 # Jupyter Notebook
 .ipynb_checkpoints
 
-# Model files dan pipeline output (terlalu besar untuk Git)
-output/
-*.pb
+# Model files dan pipeline output
+# Note: output/serving_model/ di-allow untuk Railway deployment
+output/bertrandcorneliussia-pipeline/
 *.pbtxt
 *.gz
 *.tfrecord
 *.sqlite
 *.db
 *.whl
+# Allow serving_model
+!output/
+output/*
+!output/serving_model/
+!output/serving_model/**
 
 # Database
 *.sqlite
