@@ -9,6 +9,9 @@ gunicorn==20.1.0
 tensorflow==2.10.1
 tensorflow-transform==1.11.0
 
+# Google Cloud Storage (untuk download model dari GCS)
+google-cloud-storage==2.10.0
+
 # Prometheus monitoring
 prometheus-client==0.16.0
 

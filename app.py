@@ -11,10 +11,20 @@ from flask import Flask, request, jsonify, render_template_string
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 import time
 import logging
+import tempfile
+import shutil
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Try import google cloud storage (optional - only if using GCS)
+try:
+    from google.cloud import storage
+    GCS_AVAILABLE = True
+except ImportError:
+    GCS_AVAILABLE = False
+    logger.warning("google-cloud-storage not available. GCS model loading disabled.")
 
 app = Flask(__name__)
 
@@ -68,30 +78,111 @@ def transformed_name(key):
     """Memberi nama '_xf' pada fitur yang sudah ditransformasi"""
     return key + "_xf"
 
+def download_model_from_gcs(bucket_name, blob_prefix, local_dir):
+    """Download model dari Google Cloud Storage"""
+    if not GCS_AVAILABLE:
+        raise ImportError("google-cloud-storage not installed. Install with: pip install google-cloud-storage")
+    
+    try:
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(bucket_name)
+        
+        logger.info(f"Downloading model from GCS: gs://{bucket_name}/{blob_prefix}")
+        
+        # List semua blob di bawah prefix
+        blobs = bucket.list_blobs(prefix=blob_prefix)
+        downloaded_files = 0
+        
+        for blob in blobs:
+            # Skip jika ini adalah direktori kosong
+            if blob.name.endswith('/'):
+                continue
+                
+            # Buat path lokal yang sesuai
+            relative_path = os.path.relpath(blob.name, blob_prefix)
+            local_file_path = os.path.join(local_dir, relative_path)
+            
+            # Pastikan direktori lokal ada
+            os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
+            
+            # Download file
+            logger.info(f"Downloading {blob.name} -> {local_file_path}")
+            blob.download_to_filename(local_file_path)
+            downloaded_files += 1
+        
+        logger.info(f"Downloaded {downloaded_files} files from GCS")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error downloading from GCS: {str(e)}")
+        raise
+
 def load_model_and_transform():
     """Load model dan transform graph"""
     global model, tf_transform_output, transform_layer
     
     try:
-        # Path model - cari versi terbaru
-        base_path = os.path.join('output', 'serving_model')
-        if os.path.exists(base_path):
-            # Cari folder dengan timestamp terbaru
-            versions = [d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d))]
-            if versions:
-                latest_version = sorted(versions)[-1]
-                model_path = os.path.join(base_path, latest_version)
-            else:
-                model_path = base_path
+        # Cek apakah menggunakan GCS
+        model_bucket = os.environ.get('MODEL_BUCKET')
+        model_blob_prefix = os.environ.get('MODEL_BLOB_PREFIX', 'placement_model/')
+        
+        if model_bucket and GCS_AVAILABLE:
+            # Download model dari GCS
+            logger.info("Loading model from Google Cloud Storage")
+            temp_model_dir = tempfile.mkdtemp(prefix='model_')
+            logger.info(f"Temporary model directory: {temp_model_dir}")
+            
+            try:
+                # Download model dari GCS
+                download_model_from_gcs(model_bucket, model_blob_prefix, temp_model_dir)
+                
+                # Cari folder model (bisa ada subfolder dengan version)
+                if os.path.exists(temp_model_dir):
+                    # Cek apakah ada subfolder dengan version number
+                    subdirs = [d for d in os.listdir(temp_model_dir) 
+                              if os.path.isdir(os.path.join(temp_model_dir, d)) and d.isdigit()]
+                    if subdirs:
+                        latest_version = sorted(subdirs, key=int)[-1]
+                        model_path = os.path.join(temp_model_dir, latest_version)
+                    else:
+                        model_path = temp_model_dir
+                else:
+                    model_path = temp_model_dir
+                
+                logger.info(f"Loading model from: {model_path}")
+                model = tf.keras.models.load_model(model_path)
+                logger.info("Model loaded successfully from GCS")
+                
+            except Exception as e:
+                logger.error(f"Failed to load model from GCS: {str(e)}")
+                # Cleanup temp directory
+                if os.path.exists(temp_model_dir):
+                    shutil.rmtree(temp_model_dir, ignore_errors=True)
+                raise
         else:
-            # Fallback untuk Heroku - model harus di-upload
-            model_path = os.environ.get('MODEL_PATH', 'model')
+            # Load dari local path (untuk development)
+            logger.info("Loading model from local path")
+            base_path = os.path.join('output', 'serving_model')
+            if os.path.exists(base_path):
+                # Cari folder dengan timestamp terbaru
+                versions = [d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d))]
+                if versions:
+                    latest_version = sorted(versions)[-1]
+                    model_path = os.path.join(base_path, latest_version)
+                else:
+                    model_path = base_path
+            else:
+                # Fallback
+                model_path = os.environ.get('MODEL_PATH', 'model')
+            
+            logger.info(f"Loading model from: {model_path}")
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(f"Model path not found: {model_path}")
+            
+            model = tf.keras.models.load_model(model_path)
+            logger.info("Model loaded successfully from local path")
         
-        logger.info(f"Loading model from: {model_path}")
-        model = tf.keras.models.load_model(model_path)
-        logger.info("Model loaded successfully")
-        
-        # Load transform graph
+        # Load transform graph (opsional - untuk production bisa juga dari GCS)
         transform_graph_path = os.path.join(
             'output', 
             'bertrandcorneliussia-pipeline', 
